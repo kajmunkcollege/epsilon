@@ -132,7 +132,9 @@ void TitleBarView::layoutSubviews(bool force) {
   KDCoordinate percentX =
       batteryX - k_batteryPercentRightMargin - k_batteryPercentWidth;
   setChildFrame(&m_batteryPercentView,
-                KDRect(percentX, 0, k_batteryPercentWidth, bounds().height()),
+                KDRect(percentX, k_batteryPercentVerticalShift,
+                       k_batteryPercentWidth,
+                       bounds().height() - k_batteryPercentVerticalShift),
                 force);
   if (ExamModeManager::ExamMode().isActive()) {
     setChildFrame(
