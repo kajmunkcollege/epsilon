@@ -2,6 +2,11 @@ name: Build N0120 firmware
 
 on:
   workflow_dispatch:
+  push:
+    branches: [master]
+
+permissions:
+  contents: write
 
 jobs:
   build:
@@ -27,3 +32,14 @@ jobs:
         with:
           name: n0120-firmware
           path: epsilon/output/release/n0120/userland.*.dfu
+
+      # Publishes the files at a fixed address so flash.ps1 can download them
+      - name: Publish as release "latest"
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest
+          name: Latest firmware
+          make_latest: true
+          files: |
+            epsilon/output/release/n0120/userland.A.dfu
+            epsilon/output/release/n0120/userland.B.dfu
