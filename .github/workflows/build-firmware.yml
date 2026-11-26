@@ -1,0 +1,29 @@
+name: Build N0120 firmware
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      # Installs the SDK, as described in epsilon/docs/build/README.md
+      - name: Install SDK
+        run: |
+          chmod +x tools/setup.sh
+          tools/setup.sh
+
+      # APP_VERSION must equal the version of the official firmware on the
+      # calculator (26.4.0), otherwise it will refuse the custom firmware.
+      - name: Build both slots for N0120
+        run: |
+          make -j4 -C epsilon PLATFORM=n0120 APP_VERSION=26.4.0 userland.A.dfu userland.B.dfu
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: n0120-firmware
+          path: epsilon/output/release/n0120/userland.*.dfu
