@@ -17,13 +17,21 @@ extern "C" {
 using namespace Poincare;
 using namespace Escher;
 
+/* Rough battery percentage estimated from the battery voltage (linear between
+ * these two values). Tune them if the percentage feels off. */
+constexpr static float k_batteryEmptyVoltage = 3.5f;
+constexpr static float k_batteryFullVoltage = 4.15f;
+
 TitleBarView::TitleBarView()
     : View(),
       m_titleView(I18n::Message::Default, k_glyphsFormat),
       m_preferenceView(k_glyphsFormat),
       m_examModeIconView(*ImageStore::ExamIcon),
-      m_examModeTextView(I18n::Message::Default, k_glyphsFormat) {
+      m_examModeTextView(I18n::Message::Default, k_glyphsFormat),
+      m_batteryPercentView(k_glyphsFormat) {
   m_preferenceView.setAlignment(KDGlyph::k_alignRight, KDGlyph::k_alignCenter);
+  m_batteryPercentView.setAlignment(KDGlyph::k_alignRight,
+                                    KDGlyph::k_alignCenter);
 }
 
 void TitleBarView::drawRect(KDContext* ctx, KDRect rect) const {
@@ -38,7 +46,40 @@ void TitleBarView::setTitle(I18n::Message title) {
 }
 
 bool TitleBarView::setChargeState(Ion::Battery::Charge chargeState) {
-  return m_batteryView.setChargeState(chargeState);
+  bool iconChanged = m_batteryView.setChargeState(chargeState);
+  bool percentChanged = refreshBatteryPercent();
+  return iconChanged || percentChanged;
+}
+
+bool TitleBarView::refreshBatteryPercent() {
+  float percent = (Ion::Battery::voltage() - k_batteryEmptyVoltage) /
+                  (k_batteryFullVoltage - k_batteryEmptyVoltage) * 100.0f;
+  if (percent < 0.0f) {
+    percent = 0.0f;
+  } else if (percent > 100.0f) {
+    percent = 100.0f;
+  }
+  int roundedPercent = static_cast<int>(percent + 0.5f);
+  if (roundedPercent == m_batteryPercent) {
+    return false;
+  }
+  m_batteryPercent = roundedPercent;
+  char buffer[k_batteryPercentTextSize];
+  int length = 0;
+  if (roundedPercent >= 100) {
+    buffer[length++] = '1';
+    buffer[length++] = '0';
+    buffer[length++] = '0';
+  } else {
+    if (roundedPercent >= 10) {
+      buffer[length++] = '0' + roundedPercent / 10;
+    }
+    buffer[length++] = '0' + roundedPercent % 10;
+  }
+  buffer[length++] = '%';
+  buffer[length] = '\0';
+  m_batteryPercentView.setText(buffer);
+  return true;
 }
 
 bool TitleBarView::setIsCharging(bool isCharging) {
@@ -58,13 +99,13 @@ void TitleBarView::updateBatteryAnimation() {
   m_batteryView.updateBatteryAnimation();
 }
 
-int TitleBarView::numberOfSubviews() const { return 7; }
+int TitleBarView::numberOfSubviews() const { return 8; }
 
 View* TitleBarView::subviewAtIndex(int index) {
   View* views[] = {&m_titleView,          &m_preferenceView,
                    &m_examModeIconView,   &m_examModeTextView,
                    &m_shiftAlphaLockView, &m_batteryView,
-                   &m_separatorView};
+                   &m_separatorView,      &m_batteryPercentView};
   assert(0 <= index && index < static_cast<int>(std::size(views)));
   return views[index];
 }
@@ -80,12 +121,19 @@ void TitleBarView::layoutSubviews(bool force) {
                        bounds().height()),
                 force);
   KDSize batterySize = m_batteryView.minimalSizeForOptimalDisplay();
+  KDCoordinate batteryX = bounds().width() - batterySize.width() -
+                          Metric::TitleBarExternHorizontalMargin;
   setChildFrame(
       &m_batteryView,
-      KDRect(bounds().width() - batterySize.width() -
-                 Metric::TitleBarExternHorizontalMargin,
-             (bounds().height() - batterySize.height()) / 2, batterySize),
+      KDRect(batteryX, (bounds().height() - batterySize.height()) / 2,
+             batterySize),
       force);
+  // The battery percentage is displayed on the left of the battery icon
+  KDCoordinate percentX =
+      batteryX - k_batteryPercentRightMargin - k_batteryPercentWidth;
+  setChildFrame(&m_batteryPercentView,
+                KDRect(percentX, 0, k_batteryPercentWidth, bounds().height()),
+                force);
   if (ExamModeManager::ExamMode().isActive()) {
     setChildFrame(
         &m_examModeIconView,
@@ -136,9 +184,7 @@ void TitleBarView::layoutSubviews(bool force) {
   KDSize shiftAlphaLockSize =
       m_shiftAlphaLockView.minimalSizeForOptimalDisplay();
   setChildFrame(&m_shiftAlphaLockView,
-                KDRect(bounds().width() - batterySize.width() -
-                           Metric::TitleBarExternHorizontalMargin -
-                           k_alphaRightMargin - shiftAlphaLockSize.width(),
+                KDRect(percentX - k_alphaRightMargin - shiftAlphaLockSize.width(),
                        (bounds().height() - shiftAlphaLockSize.height()) / 2,
                        shiftAlphaLockSize),
                 force);
@@ -186,5 +232,6 @@ void TitleBarView::refreshPreferences() {
 
 void TitleBarView::reload() {
   refreshPreferences();
+  refreshBatteryPercent();
   markWholeFrameAsDirty();
 }
