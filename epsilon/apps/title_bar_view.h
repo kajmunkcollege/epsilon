@@ -35,6 +35,10 @@ class TitleBarView : public Escher::View {
   constexpr static KDCoordinate k_batteryPercentWidth =
       KDFont::GlyphWidth(KDFont::Size::Small) * 4;
   constexpr static KDCoordinate k_batteryPercentRightMargin = 3;
+  /* The digits have no descenders, so centered text looks slightly too high
+   * next to the icon. Shift the text down by this many pixels. Tune it (0, 1
+   * or 2) if the alignment is still off. */
+  constexpr static KDCoordinate k_batteryPercentVerticalShift = 1;
   constexpr static KDCoordinate k_alphaRightMargin = 5;
   constexpr static KDCoordinate k_examIconWidth = 18;
   constexpr static KDCoordinate k_examIconHeight = 9;
