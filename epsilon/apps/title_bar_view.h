@@ -29,6 +29,12 @@ class TitleBarView : public Escher::View {
 
  private:
   constexpr static size_t k_preferenceTextSize = sizeof("tech/rad");
+  // "100%" plus the terminating null character
+  constexpr static size_t k_batteryPercentTextSize = sizeof("100%");
+  // Fixed width (4 glyphs) so the layout does not move when the text changes
+  constexpr static KDCoordinate k_batteryPercentWidth =
+      KDFont::GlyphWidth(KDFont::Size::Small) * 4;
+  constexpr static KDCoordinate k_batteryPercentRightMargin = 3;
   constexpr static KDCoordinate k_alphaRightMargin = 5;
   constexpr static KDCoordinate k_examIconWidth = 18;
   constexpr static KDCoordinate k_examIconHeight = 9;
@@ -51,6 +57,8 @@ class TitleBarView : public Escher::View {
   int numberOfSubviews() const override;
   void layoutSubviews(bool force = false) override;
   Escher::View* subviewAtIndex(int index) override;
+  // Returns true if the displayed percentage changed
+  bool refreshBatteryPercent();
 
   Escher::MessageTextView m_titleView;
   BatteryView m_batteryView;
@@ -60,4 +68,6 @@ class TitleBarView : public Escher::View {
   Escher::MessageTextView m_examModeTextView;
   Escher::SolidColorView m_separatorView{
       Escher::ThemeComponent::SeparatorTitleBar};
+  Escher::BufferTextView<k_batteryPercentTextSize> m_batteryPercentView;
+  int m_batteryPercent = -1;
 };
