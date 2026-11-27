@@ -1,214 +1,397 @@
 #include "main_controller.h"
 
-#include <escher/clipboard.h>
+#include <apps/apps_container.h>
+#include <apps/exam_mode_manager.h>
+#include <apps/global_preferences.h>
+#include <apps/i18n.h>
+#include <assert.h>
+#include <ion/authentication.h>
 
-#include "app.h"
-#include "table_layout.h"
+using namespace Poincare;
+using namespace Shared;
+using namespace Escher;
 
-namespace Elements {
+namespace Settings {
 
-// MainController::ContentView
+constexpr MessageTree s_modelAngleChildren[3] = {
+    MessageTree(I18n::Message::Radian), MessageTree(I18n::Message::Degrees),
+    MessageTree(I18n::Message::Gradians)};
+constexpr MessageTree s_modelEditionModeChildren[2] = {
+    MessageTree(I18n::Message::Edition2D),
+    MessageTree(I18n::Message::EditionLinear)};
+constexpr MessageTree s_modelFloatDisplayModeChildren[4] = {
+    MessageTree(I18n::Message::Decimal), MessageTree(I18n::Message::Scientific),
+    MessageTree(I18n::Message::Engineering),
+    MessageTree(I18n::Message::SignificantFigures)};
+constexpr MessageTree s_modelComplexFormatChildren[3] = {
+    MessageTree(I18n::Message::Real), MessageTree(I18n::Message::Algebraic),
+    MessageTree(I18n::Message::Exponential)};
+constexpr MessageTree
+    s_modelScreenTimeoutChildren[ScreenTimeoutController::k_totalNumberOfCell] =
+        {MessageTree(I18n::Message::ThirtySeconds),
+         MessageTree(I18n::Message::OneMinute),
+         MessageTree(I18n::Message::TwoMinutes),
+         MessageTree(I18n::Message::FiveMinutes)};
+constexpr MessageTree s_modelAccessibilityChildren[2] = {
+    MessageTree(I18n::Message::ContrastMode),
+    MessageTree(I18n::Message::Magnify)};
+constexpr MessageTree s_modelFontChildren[2] = {
+    MessageTree(I18n::Message::LargeFont),
+    MessageTree(I18n::Message::SmallFont)};
+constexpr MessageTree s_modelTestModeMenu[2] = {
+    MessageTree(I18n::Message::ExamMode),
+    MessageTree(I18n::Message::PressToTest)};
+constexpr MessageTree
+    s_modelAboutChildren[AboutController::k_totalNumberOfCell] = {
+        MessageTree(I18n::Message::Name),
+        MessageTree(I18n::Message::SoftwareVersion),
+        MessageTree(I18n::Message::SerialNumber),
+        MessageTree(I18n::Message::FccId),
+        MessageTree(I18n::Message::StorageUsage),
+        MessageTree(I18n::Message::ExternalAppsUsage),
+#if TERMS_OF_USE
+        MessageTree(I18n::Message::TermsOfUse),
+#endif
+};
 
-Escher::View* MainController::ContentView::subviewAtIndex(int index) {
-  if (index == 0) {
-    return &m_elementsView;
+bool hideExamModes() {
+  /* Since this would only reset to the official firmware without selected exam
+   * mode, setting an exam mode is disabled in third-party firmwares. */
+  return Ion::Authentication::clearanceLevel() ==
+         Ion::Authentication::ClearanceLevel::ThirdParty;
+}
+
+MainController::MainController(Responder* parentResponder)
+    : SelectableListViewController(parentResponder),
+      m_resetButton(&m_selectableListView, I18n::Message::ResetCalculator,
+                    Invocation::Builder<MainController>(
+                        [](MainController* controller, void* sender) {
+                          controller->m_resetController.presentModally();
+                          return true;
+                        },
+                        this),
+                    ButtonCell::Style::EmbossedLight),
+      m_preferencesController(this),
+      m_displayModeController(this),
+      m_accessibilityController(this),
+      m_screenTimeoutController(this),
+      m_localizationController(this, LocalizationController::Mode::Language),
+      m_examModeController(this),
+      m_pressToTestController(this),
+      m_testModeController(this, this),
+      m_aboutController(this),
+      m_resetController(Invocation::Builder<MainController>(
+                            [](MainController* controller, void* sender) {
+                              Ion::Reset::coreDeleteApps();
+                              return true;
+                            },
+                            this),
+                        I18n::Message::ResetCalculatorWarning) {
+  // Assert the ExamMode and Press-to-test cells are correctly placed.
+  assert(subControllerForCell(messageAtModelIndex(k_indexOfExamModeCell)) ==
+         &m_examModeController);
+  assert(subControllerForCell(messageAtModelIndex(k_indexOfExamModeCell + 1)) ==
+         &m_pressToTestController);
+}
+
+bool MainController::handleEvent(Ion::Events::Event event) {
+  int index = selectedRow();
+  if (event == Ion::Events::Zero) {
+    int aboutIndex = s_aboutIndex - !hasExamModeCell() - !hasPressToTestCell() -
+                     !hasTestModeCell();
+    if (index != aboutIndex) {
+      m_selectableListView.selectCell(aboutIndex);
+      return true;
+    }
+    // Open About section
+    pushModel(model()->childAtIndex(getModelIndex(selectedRow())));
+    return true;
   }
-  assert(index == 1);
-  return &m_bannerView;
-}
-
-void MainController::ContentView::layoutSubviews(bool force) {
-  KDSize bannerSize = m_bannerView.minimalSizeForOptimalDisplay();
-  setChildFrame(&m_bannerView,
-                KDRect(0, bounds().height() - bannerSize.height(),
-                       bounds().width(), bannerSize.height()),
-                force);
-  setChildFrame(
-      &m_elementsView,
-      KDRect(0, 0, bounds().width(), bounds().height() - bannerSize.height()),
-      force);
-}
-
-// MainController
-
-MainController::MainController(Escher::StackViewController* parentResponder)
-    : ViewController(parentResponder),
-      m_detailsController(parentResponder),
-      m_displayTypeController(parentResponder),
-      m_view(this) {}
-
-void MainController::selectedElementHasChanged() {
-  m_view.bannerView()->reload();
-  m_view.elementsView()->cursorMoved();
-  m_detailsController.selectableListView()->resetSizeAndOffsetMemoization();
-}
-
-void MainController::activeDataFieldHasChanged() {
-  m_view.bannerView()->reload();
-}
-
-bool MainController::handleEvent(Ion::Events::Event e) {
-  ElementsViewDataSource* dataSource = App::app()->elementsViewDataSource();
-  AtomicNumber z = dataSource->selectedElement();
-
-  if (!ElementsDataBase::IsElement(z)) {
-    if (e == Ion::Events::Up) {
-      dataSource->setSelectedElement(dataSource->previousElement());
-      return true;
-    }
-    if (e == Ion::Events::OK || e == Ion::Events::EXE) {
-      stackOpenPage(&m_displayTypeController);
-      return true;
-    }
+  int type = typeAtRow(index);
+  if (type == k_resetCellType) {
+    // Escape now since ButtonCell is not a MenuCell
     return false;
   }
 
-  if (e == Ion::Events::OK || e == Ion::Events::EXE) {
-    stackOpenPage(&m_detailsController);
-    return true;
+  AbstractMenuCell* cell =
+      static_cast<AbstractMenuCell*>(m_selectableListView.cell(index));
+  if (!cell->canBeActivatedByEvent(event)) {
+    return false;
   }
 
-  AtomicNumber newZ = z;
-  if (e == Ion::Events::Up) {
-    newZ = TableLayout::NextElement(z, TableLayout::Direction::DecreasingRow);
-  } else if (e == Ion::Events::Down) {
-    newZ = TableLayout::NextElement(z, TableLayout::Direction::IncreasingRow);
-  } else if (e == Ion::Events::Left) {
-    newZ = TableLayout::NextElement(z, TableLayout::Direction::DecreasingZ);
-  } else if (e == Ion::Events::Right) {
-    newZ = TableLayout::NextElement(z, TableLayout::Direction::IncreasingZ);
-  }
-  dataSource->setSelectedElement(newZ);
-  return newZ != z;
-}
-
-void MainController::textFieldDidStartEditing(
-    Escher::AbstractTextField* textField) {
-  ElementsViewDataSource* dataSource = App::app()->elementsViewDataSource();
-  dataSource->setTextFilter(m_view.bannerView()->textField()->text());
-  if (ElementsDataBase::IsElement(dataSource->selectedElement())) {
-    /* Changing the selected element will reload the banner. */
-    dataSource->setSelectedElement(ElementsDataBase::k_noElement);
+  if (type == k_popUpCellType) {
+    GlobalPreferences::SharedGlobalPreferences()->setShowPopUp(
+        !SharedGlobalPrefs().showPopUp());
+    m_selectableListView.reloadSelectedCell();
+  } else if (type == k_brightnessCellType) {
+    int delta = Ion::Backlight::MaxBrightness /
+                GlobalPreferences::NumberOfBrightnessStates;
+    assert(GaugeView::DirectionForEvent(event) != 0);
+    GlobalPreferences::SharedGlobalPreferences()->setBrightnessLevel(
+        SharedGlobalPrefs().brightnessLevel() +
+        GaugeView::DirectionForEvent(event) * delta);
+    m_selectableListView.reloadSelectedCell();
   } else {
-    m_view.bannerView()->reload();
-  }
-}
+    assert(type == k_defaultCellType);
+    int modelIndex = getModelIndex(selectedRow());
+    I18n::Message selectedMessage = messageAtModelIndex(modelIndex);
 
-bool MainController::textFieldDidReceiveEvent(
-    Escher::AbstractTextField* textField, Ion::Events::Event event) {
-  // Sto event needs to be handled here before AbstractTextField handles it.
-  if (event == Ion::Events::Sto || event == Ion::Events::Var) {
-    /* ElementsView only redraws its background when appearing to avoid
-     * blinking. It needs to be redrawn after the store menu */
-    m_view.elementsView()->dirtyBackground();
-  }
-  if (textField->isEditing()) {
-    if (textField->cursorAtEndOfText()) {
-      if (event == Ion::Events::Up || event == Ion::Events::Down) {
-        ElementsViewDataSource* dataSource =
-            App::app()->elementsViewDataSource();
-        m_view.bannerView()->textField()->setSuggestion(
-            dataSource->cycleSuggestion(event == Ion::Events::Down));
-        return true;
-      }
-      if (event == Ion::Events::Right) {
-        /* Commit to suggested text on Right press. */
-        m_view.bannerView()->textField()->commitSuggestion();
-        m_view.elementsView()->reload();
-        return true;
-      }
+    if (selectedMessage == I18n::Message::Language) {
+      m_localizationController.setMode(LocalizationController::Mode::Language);
+    } else if (selectedMessage == I18n::Message::Country) {
+      m_localizationController.setMode(LocalizationController::Mode::Country);
     }
-  } else if (event == Ion::Events::OK || event == Ion::Events::EXE) {
-    /* OK should not start the edition */
-    return handleEvent(event);
+    pushModel(model()->childAtIndex(modelIndex));
   }
-
-  // Handle Copy / store / varbox.
-
-  ElementsViewDataSource* dataSource = App::app()->elementsViewDataSource();
-  AtomicNumber z = dataSource->selectedElement();
-  if (z == ElementsDataBase::k_noElement) {
-    return false;
-  }
-
-  if (event == Ion::Events::Copy || event == Ion::Events::Cut ||
-      event == Ion::Events::Var || event == Ion::Events::Sto) {
-    assert(App::app()->canStoreLayout());
-    Poincare::Layout toStore;
-
-    if (dataSource->field()->canBeStored(z)) {
-      toStore = dataSource->field()->getLayout(z);
-    }
-
-    if (event == Ion::Events::Var || event == Ion::Events::Sto) {
-      App::app()->storeLayout(toStore);
-    } else if (!toStore.isUninitialized()) {
-      assert(event == Ion::Events::Copy || event == Ion::Events::Cut);
-      Escher::Clipboard::SharedClipboard()->storeLayout(toStore);
-    }
-
-    return true;
-  }
-
-  return false;
-}
-
-bool MainController::textFieldDidFinishEditing(
-    Escher::AbstractTextField* textField, Ion::Events::Event event) {
-  m_view.bannerView()->textField()->commitSuggestion();
-  AtomicNumber match =
-      App::app()->elementsViewDataSource()->elementSearchResult();
-  if (!ElementsDataBase::IsElement(match)) {
-    match = 1;
-  }
-  endElementSearch(match);
   return true;
 }
 
-void MainController::textFieldDidAbortEditing(
-    Escher::AbstractTextField* textField) {
-  endElementSearch(App::app()->elementsViewDataSource()->previousElement());
+void MainController::pushModel(const Escher::MessageTree* messageTreeModel) {
+  ViewController* selectedSubController =
+      subControllerForCell(messageTreeModel->label());
+  assert(selectedSubController);
+  if (messageTreeModel->numberOfChildren() != 0) {
+    static_cast<GenericSubController*>(selectedSubController)
+        ->setMessageTreeModel(messageTreeModel);
+    static_cast<GenericSubController*>(selectedSubController)
+        ->selectableListView()
+        ->resetSizeAndOffsetMemoization();
+  }
+  stackController()->push(selectedSubController);
 }
 
-void MainController::textFieldDidHandleEvent(
-    Escher::AbstractTextField* textField) {
-  if (textField->isEditing()) {
-    if (textField->draftTextLength() == 0) {
-      textField->setEditing(false);
-      endElementSearch(App::app()->elementsViewDataSource()->previousElement());
-    } else if (textField->cursorAtEndOfText()) {
-      /* Update suggestion text */
-      ElementsViewDataSource* dataSource = App::app()->elementsViewDataSource();
-      m_view.bannerView()->textField()->setSuggestion(
-          dataSource->suggestedElementName());
-    } else {
-      m_view.bannerView()->textField()->setSuggestion(nullptr);
+int MainController::numberOfRows() const {
+  assert(hideExamModes() ||
+         hasExamModeCell() + hasPressToTestCell() + hasTestModeCell() == 1);
+  return model()->numberOfChildren() + hasExamModeCell() +
+         hasPressToTestCell() + hasTestModeCell() - 3;
+};
+
+KDCoordinate MainController::nonMemoizedRowHeight(int row) {
+  switch (typeAtRow(row)) {
+    case k_brightnessCellType:
+      return protectedNonMemoizedRowHeight(&m_brightnessCell, row);
+    case k_popUpCellType:
+      return protectedNonMemoizedRowHeight(&m_popUpCell, row);
+    case k_resetCellType:
+      return protectedNonMemoizedRowHeight(&m_resetButton, row);
+    default:
+      SubMenuCell tempCell;
+      return protectedNonMemoizedRowHeight(&tempCell, row);
+  }
+}
+
+HighlightCell* MainController::reusableCell(int index, int type) {
+  assert(index >= 0);
+  if (type == k_defaultCellType) {
+    assert(index < k_numberOfSimpleChevronCells);
+    return &m_cells[index];
+  }
+  assert(index == 0);
+  if (type == k_popUpCellType) {
+    return &m_popUpCell;
+  }
+  if (type == k_resetCellType) {
+    return &m_resetButton;
+  }
+  assert(type == k_brightnessCellType);
+  return &m_brightnessCell;
+}
+
+int MainController::reusableCellCount(int type) const {
+  if (type == k_defaultCellType) {
+    return k_numberOfSimpleChevronCells;
+  }
+  return 1;
+}
+
+int MainController::typeAtRow(int row) const {
+  switch (messageAtModelIndex(getModelIndex(row))) {
+    case I18n::Message::Brightness:
+      return k_brightnessCellType;
+    case I18n::Message::UpdatePopUp:
+    case I18n::Message::BetaPopUp:
+      return k_popUpCellType;
+    case I18n::Message::ResetCalculator:
+      return k_resetCellType;
+    default:
+      return k_defaultCellType;
+  };
+}
+
+void MainController::fillCellForRow(HighlightCell* cell, int row) {
+  /* TODO: each child controller (m_preferencesController,
+   * m_displayModeController...) should be responsible for getting the current
+   * value from GlobalPreferences. This would make the code more modular and
+   * thus clearer. */
+
+  int modelIndex = getModelIndex(row);
+  I18n::Message title = model()->childAtIndex(modelIndex)->label();
+  int type = typeAtRow(row);
+  if (type == k_brightnessCellType) {
+    assert(&m_brightnessCell == cell);
+    m_brightnessCell.label()->setMessage(title);
+    m_brightnessCell.accessory()->setLevel(
+        (float)SharedGlobalPrefs().brightnessLevel() /
+        (float)Ion::Backlight::MaxBrightness);
+    return;
+  }
+  if (type == k_resetCellType) {
+    return;
+  }
+  static_cast<MessageTextView*>(
+      static_cast<AbstractMenuCell*>(cell)->widget(CellWidget::Type::Label))
+      ->setMessage(title);
+  if (type == k_popUpCellType) {
+    assert(cell == &m_popUpCell);
+    m_popUpCell.accessory()->setState(SharedGlobalPrefs().showPopUp());
+    return;
+  }
+  assert(type == k_defaultCellType);
+
+  /* TODO: the two following "if" blocks could be factorized into the switch /
+   * case that appears right after. */
+  I18n::Message message = messageAtModelIndex(modelIndex);
+  if (message == I18n::Message::Language) {
+    int languageIndex = (int)(SharedGlobalPrefs().language());
+    static_cast<SubMenuCell*>(cell)->subLabel()->setMessage(
+        I18n::LanguageNames[languageIndex]);
+    return;
+  }
+  if (message == I18n::Message::Country) {
+    int countryIndex = (int)(SharedGlobalPrefs().country());
+    static_cast<SubMenuCell*>(cell)->subLabel()->setMessage(
+        I18n::CountryNames[countryIndex]);
+    return;
+  }
+  SubMenuCell* myTextCell = static_cast<SubMenuCell*>(cell);
+  int childIndex = -1;
+  switch (message) {
+    case I18n::Message::AngleUnit:
+      childIndex = (int)SharedGlobalPrefs().angleUnit();
+      break;
+    case I18n::Message::DisplayMode:
+      childIndex = (int)SharedGlobalPrefs().displayMode();
+      break;
+    case I18n::Message::EditionMode:
+      childIndex = (int)SharedGlobalPrefs().editionMode();
+      break;
+    case I18n::Message::ComplexFormat:
+      childIndex = (int)SharedGlobalPrefs().complexFormat();
+      break;
+    case I18n::Message::ScreenTimeout:
+      childIndex = ScreenTimeoutController::toRowLabel(
+          SharedGlobalPrefs().dimmingTime());
+      break;
+    case I18n::Message::FontSizes:
+      childIndex = SharedGlobalPrefs().font() == KDFont::Size::Large ? 0 : 1;
+      break;
+    default:
+      childIndex = -1;
+      break;
+  }
+  I18n::Message subtitle =
+      childIndex >= 0
+          ? model()->childAtIndex(modelIndex)->childAtIndex(childIndex)->label()
+          : I18n::Message::Default;
+  myTextCell->subLabel()->setMessage(subtitle);
+}
+
+KDCoordinate MainController::separatorBeforeRow(int row) const {
+  return typeAtRow(row) == k_brightnessCellType ||
+                 typeAtRow(row) == k_resetCellType
+             ? k_defaultRowSeparator
+             : 0;
+}
+
+void MainController::viewWillAppear() {
+  ViewController::viewWillAppear();
+  m_selectableListView.reloadData();
+}
+
+I18n::Message MainController::messageAtModelIndex(int i) const {
+  return model()->childAtIndex(i)->label();
+}
+
+const MessageTree* MainController::model() { return &s_model; }
+
+StackViewController* MainController::stackController() const {
+  return (StackViewController*)parentResponder();
+}
+
+ViewController* MainController::subControllerForCell(
+    I18n::Message cellMessage) {
+  switch (cellMessage) {
+    case I18n::Message::AngleUnit:
+    case I18n::Message::EditionMode:
+    case I18n::Message::ComplexFormat:
+    case I18n::Message::FontSizes:
+      return &m_preferencesController;
+    case I18n::Message::DisplayMode:
+      return &m_displayModeController;
+    case I18n::Message::Accessibility:
+      return &m_accessibilityController;
+    case I18n::Message::ScreenTimeout:
+      return &m_screenTimeoutController;
+    case I18n::Message::Language:
+    case I18n::Message::Country:
+      return &m_localizationController;
+    case I18n::Message::ExamMode:
+      return &m_examModeController;
+    case I18n::Message::PressToTest:
+      return &m_pressToTestController;
+    case I18n::Message::TestMode:
+      return &m_testModeController;
+    case I18n::Message::About:
+      return &m_aboutController;
+    default:
+      return nullptr;
+  }
+}
+
+bool MainController::hasExamModeCell() const {
+  // If only exam modes are available
+  return !hideExamModes() && !hasTestModeCell() &&
+         m_examModeController.numberOfRows() > 0;
+}
+
+bool MainController::hasPressToTestCell() const {
+  // If only press to test is available
+  return !hideExamModes() && m_examModeController.numberOfRows() == 0;
+}
+
+bool MainController::hasTestModeCell() const {
+  // If both exam mode and press to test are available
+  CountryPreferences::AvailableExamModes examMode =
+      SharedGlobalPrefs().availableExamModes();
+  return !hideExamModes() &&
+         (examMode == CountryPreferences::AvailableExamModes::All ||
+          examMode == CountryPreferences::AvailableExamModes::AmericanAll) &&
+         ExamModeManager::ExamMode().ruleset() == ExamMode::Ruleset::Off;
+}
+
+int MainController::getModelIndex(int index) const {
+  /* Return the index of the model from the index of the displayed row.
+   * Up until k_indexOfExamModeCell, no cell is hidden, the index is the same.
+   * Then, either the exam mode or the press-to-test cell is hidden. */
+  assert(index >= 0 && index < numberOfRows());
+  if (index > k_indexOfExamModeCell) {
+    index += 3 - hasExamModeCell() - hasPressToTestCell() - hasTestModeCell();
+  } else if (index == k_indexOfExamModeCell) {
+    if (!hasExamModeCell()) {
+      // Hidden exam mode cell
+      index += 1;
+      if (!hasPressToTestCell()) {
+        // Hidden press-to-test cell
+        index += 1;
+        if (!hasTestModeCell()) {
+          index += 1;
+        }
+      }
     }
   }
-  m_view.elementsView()->reload();
+  assert(index < model()->numberOfChildren());
+  return index;
 }
 
-void MainController::endElementSearch(AtomicNumber z) {
-  ElementsViewDataSource* dataSource = App::app()->elementsViewDataSource();
-  dataSource->setSelectedElement(z);
-  dataSource->setTextFilter(nullptr);
-  m_view.bannerView()->textField()->setSuggestion(nullptr);
-}
-
-void MainController::handleResponderChainEvent(
-    Responder::ResponderChainEvent event) {
-  if (event.type == ResponderChainEventType::HasBecomeFirst) {
-    Escher::App::app()->setFirstResponder(m_view.bannerView()->textField());
-  } else {
-    Escher::ViewController::handleResponderChainEvent(event);
-  }
-}
-
-void MainController::privateModalViewAltersFirstResponder(
-    FirstResponderAlteration alteration) {
-  if (alteration == FirstResponderAlteration::WillSpoil) {
-    m_view.elementsView()->dirtyBackground();
-  }
-}
-
-}  // namespace Elements
+}  // namespace Settings
