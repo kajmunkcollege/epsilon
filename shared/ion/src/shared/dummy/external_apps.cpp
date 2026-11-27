@@ -28,6 +28,11 @@ void deleteApps(bool isExamModeActive, bool keepAfterCrash) {}
 
 bool allowThirdParty() { return false; }
 
+void flashUsage(uint32_t* usedBytes, uint32_t* totalBytes) {
+  *usedBytes = 0;
+  *totalBytes = 0;
+}
+
 void updateClearanceLevel(bool isExamModeActive) {
   assert(numberOfApps(isExamModeActive) == 0);
 }
