@@ -5,6 +5,7 @@
 #include <assert.h>
 #include <ion/device_name.h>
 #include <ion/src/shared/events.h>
+#include <ion/storage/file_system.h>
 
 #include <cmath>
 
@@ -132,12 +133,43 @@ KDCoordinate AboutController::nonMemoizedRowHeight(int row) {
              : 0;
 }
 
+static char* AppendNumber(char* position, int value) {
+  if (value >= 10) {
+    position = AppendNumber(position, value / 10);
+  }
+  *position = static_cast<char>('0' + value % 10);
+  return position + 1;
+}
+
+void AboutController::updateStorageText() {
+  /* Shows the used and the total size of the user storage in KB. The sizes are
+   * rounded to the nearest KB. */
+  constexpr int k_bytesPerKB = 1024;
+  int totalBytes = static_cast<int>(Ion::Storage::FileSystem::k_totalSize);
+  int availableBytes = static_cast<int>(
+      Ion::Storage::FileSystem::sharedFileSystem->availableSize());
+  int usedBytes = totalBytes - availableBytes;
+  if (usedBytes < 0) {
+    usedBytes = 0;
+  }
+  char* position = m_storageText;
+  position = AppendNumber(position, (usedBytes + k_bytesPerKB / 2) / k_bytesPerKB);
+  *position++ = '/';
+  position = AppendNumber(position, (totalBytes + k_bytesPerKB / 2) / k_bytesPerKB);
+  *position++ = ' ';
+  *position++ = 'K';
+  *position++ = 'B';
+  *position = '\0';
+}
+
 void AboutController::viewWillAppear() {
+  updateStorageText();
   const char* messages[k_totalNumberOfCell] = {
     deviceName(),
     Ion::softwareVersion(),
     Ion::serialNumber(),
     Ion::fccId(),
+    m_storageText,
 #if TERMS_OF_USE
     "",
 #endif
