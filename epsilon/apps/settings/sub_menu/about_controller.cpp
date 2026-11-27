@@ -4,6 +4,7 @@
 #include <apps/exam_mode_manager.h>
 #include <assert.h>
 #include <ion/device_name.h>
+#include <ion/external_apps.h>
 #include <ion/src/shared/events.h>
 #include <ion/storage/file_system.h>
 
@@ -141,25 +142,38 @@ static char* AppendNumber(char* position, int value) {
   return position + 1;
 }
 
-void AboutController::updateStorageText() {
-  /* Shows the used and the total size of the user storage in KB. The sizes are
-   * rounded to the nearest KB. */
+/* Writes "used/total KB" in the buffer. The sizes are rounded to the nearest
+ * KB. */
+static void WriteUsage(char* buffer, int usedBytes, int totalBytes) {
   constexpr int k_bytesPerKB = 1024;
-  int totalBytes = static_cast<int>(Ion::Storage::FileSystem::k_totalSize);
-  int availableBytes = static_cast<int>(
-      Ion::Storage::FileSystem::sharedFileSystem->availableSize());
-  int usedBytes = totalBytes - availableBytes;
   if (usedBytes < 0) {
     usedBytes = 0;
   }
-  char* position = m_storageText;
-  position = AppendNumber(position, (usedBytes + k_bytesPerKB / 2) / k_bytesPerKB);
+  char* position = buffer;
+  position =
+      AppendNumber(position, (usedBytes + k_bytesPerKB / 2) / k_bytesPerKB);
   *position++ = '/';
-  position = AppendNumber(position, (totalBytes + k_bytesPerKB / 2) / k_bytesPerKB);
+  position =
+      AppendNumber(position, (totalBytes + k_bytesPerKB / 2) / k_bytesPerKB);
   *position++ = ' ';
   *position++ = 'K';
   *position++ = 'B';
   *position = '\0';
+}
+
+void AboutController::updateStorageText() {
+  // Storage of the calculator data (scripts, functions...)
+  int totalBytes = static_cast<int>(Ion::Storage::FileSystem::k_totalSize);
+  int availableBytes = static_cast<int>(
+      Ion::Storage::FileSystem::sharedFileSystem->availableSize());
+  WriteUsage(m_storageText, totalBytes - availableBytes, totalBytes);
+
+  // Flash memory reserved for the external apps
+  uint32_t appsUsedBytes = 0;
+  uint32_t appsTotalBytes = 0;
+  Ion::ExternalApps::flashUsage(&appsUsedBytes, &appsTotalBytes);
+  WriteUsage(m_appsText, static_cast<int>(appsUsedBytes),
+             static_cast<int>(appsTotalBytes));
 }
 
 void AboutController::viewWillAppear() {
@@ -170,6 +184,7 @@ void AboutController::viewWillAppear() {
     Ion::serialNumber(),
     Ion::fccId(),
     m_storageText,
+    m_appsText,
 #if TERMS_OF_USE
     "",
 #endif

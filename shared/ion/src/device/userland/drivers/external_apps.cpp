@@ -164,6 +164,27 @@ void deleteApps(bool isExamModeActive, bool keepAfterCrash) {
 
 bool allowThirdParty() { return true; }
 
+void flashUsage(uint32_t* usedBytes, uint32_t* totalBytes) {
+  uint8_t* start = &_external_apps_flash_start;
+  uint8_t* end = &_external_apps_flash_end;
+  *totalBytes = static_cast<uint32_t>(end - start);
+  /* Apps are stored one after the other, each one starting on a sector
+   * boundary. The used size is the position after the last app. */
+  uint8_t* address = start;
+  while (address + App::k_minAppSize <= end && appAtAddress(address)) {
+    uint32_t size =
+        *reinterpret_cast<uint32_t*>(address + 6 * sizeof(uint32_t));
+    if (size < App::k_minAppSize) {
+      break;
+    }
+    address = nextSectorAlignedAddress(address + size);
+  }
+  if (address > end) {
+    address = end;
+  }
+  *usedBytes = static_cast<uint32_t>(address - start);
+}
+
 void updateClearanceLevel(bool isExamModeActive) {
   if (numberOfApps(isExamModeActive) > 0) {
     Device::Board::updateClearanceLevelForExternalApps();  // Display pop-up

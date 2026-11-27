@@ -79,6 +79,9 @@ int numberOfApps(bool isExamModeActive);
 void deleteApps(bool isExamModeActive, bool keepAfterCrash);
 bool allowThirdParty();
 
+// Used and total size (in bytes) of the flash section for external apps
+void flashUsage(uint32_t* usedBytes, uint32_t* totalBytes);
+
 // Update clearance level if there are external apps
 void updateClearanceLevel(bool isExamModeActive);
 

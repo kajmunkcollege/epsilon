@@ -23,6 +23,7 @@ class AboutController : public GenericSubController {
     SerialNumber,
     FCCID,
     Storage,
+    ExternalApps,
 #if TERMS_OF_USE
     TermsOfUse,
 #endif
@@ -39,6 +40,8 @@ class AboutController : public GenericSubController {
   // "42/42 KB" plus the terminating null character
   constexpr static int k_storageTextSize = 16;
   char m_storageText[k_storageTextSize];
+  // "3999/3999 KB" plus the terminating null character
+  char m_appsText[k_storageTextSize];
   Escher::MenuCell<Escher::MessageTextView, Escher::OneLineBufferTextView<>>
       m_cells[k_totalNumberOfCell];
 #ifdef HARDWARE_CHECKUP
