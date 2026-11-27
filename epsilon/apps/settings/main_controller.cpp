@@ -48,6 +48,7 @@ constexpr MessageTree
         MessageTree(I18n::Message::SerialNumber),
         MessageTree(I18n::Message::FccId),
         MessageTree(I18n::Message::StorageUsage),
+        MessageTree(I18n::Message::ExternalAppsUsage),
 #if TERMS_OF_USE
         MessageTree(I18n::Message::TermsOfUse),
 #endif
